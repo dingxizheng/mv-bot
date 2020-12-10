@@ -5,7 +5,7 @@ require "./app/app"
 
 VideoProcessor.start
 VideoUploader.start
-MiguDownloader.start
+MusicDownloader.start
 
 at_exit do 
   LOG.info "Stoping all processors..."

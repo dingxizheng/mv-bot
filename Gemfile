@@ -5,6 +5,12 @@ gem "dotenv"
 # Mp3 file
 gem "mp3info"
 
+# Parse html
+gem "nokogiri"
+
+# Language detection
+gem "cld"
+
 # rest client
 gem "rest-client", "~> 2.0.2"
 gem "faraday"

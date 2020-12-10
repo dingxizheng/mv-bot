@@ -21,6 +21,8 @@ class Song
   field :mp3_url,             type: String
   field :pic_url,             type: String
 
+  field :english,             type: Boolean
+
   def self.create_from_info(input)
     song = Song.new
     input.each do |k, v|
@@ -38,13 +40,43 @@ class Song
   end
 
   def song_description
-    <<~TXT
-    Welcome to subscribe us https://www.youtube.com/channel/UCMSUswyigS3R59TXLN2K_IA?view_as=subscriber
+    if is_english?
+      <<~TXT
+      If you like the video, please subscribe us at https://www.youtube.com/channel/UCMSUswyigS3R59TXLN2K_IA?view_as=subscriber
 
-    #{lyrics_list.map { _1["lyric"] }.join("\n")}\n
+      #{song_lyrics.gsub("歌曲名", "SONG NAME").gsub("歌手名", "SINGER").gsub("作曲", "COMPOSER").gsub("作词", "LYRICIST")}
 
-    **該音樂版權為歌手及其音樂公司所有，本頻道僅提供推廣及宣傳只用，若喜歡他們的音樂請支持正版。如版權方認為該影片有侵權一事，請與本頻道聯繫，收到通知後將立即刪除，谢谢。**
-    TXT
+      **Disclaimer: This video is purely fan-made, if you (owners) want to remove this video, please CONTACT US DIRECTLY before doing anything. We will respectfully remove it**
+      TXT
+    else
+      <<~TXT
+      Welcome to subscribe us https://www.youtube.com/channel/UCMSUswyigS3R59TXLN2K_IA?view_as=subscriber
+
+      #{song_lyrics}
+
+      **該音樂版權為歌手及其音樂公司所有，本頻道僅提供推廣及宣傳只用，若喜歡他們的音樂請支持正版。如版權方認為該影片有侵權一事，請與本頻道聯繫，收到通知後將立即刪除，谢谢。**
+      TXT
+    end
+  end
+
+  def song_title
+    if is_english?
+      "#{artist} - #{name} (Unoffical Lyric Video)"
+    else
+      "#{artist} - #{name} (动态歌词)"
+    end
+  end
+
+  def song_tags
+    if is_english?
+      ["Lyric", "Lyrics", title, artist, album]
+    else
+      ["华语", "经典", "歌词", "高清", title, artist, album]
+    end
+  end
+
+  def song_lyrics
+    lyrics_list.map { _1["lyric"] }.join("\n")
   end
 
   def create_job!
@@ -83,5 +115,21 @@ class Song
 
   def video_cover_file_path
     File.join(music_folder_path, "#{musicid}_video_cover.jpg")
+  end
+
+  def is_english?
+    # [CLD.detect_language(song_lyrics), CLD.detect_language(title), CLD.detect_language(artist)].
+    if CLD.detect_language(song_lyrics)[:name] == "ENGLISH"
+      if CLD.detect_language(title)[:name] == "ENGLISH" || CLD.detect_language(title)[:name] == "Unknown"
+        if CLD.detect_language(artist) == "Chinese" || CLD.detect_language(artist) == "Japanese"
+          return false
+        end
+        true
+      else
+        false
+      end
+    else
+      false
+    end
   end
 end

@@ -1,0 +1,13 @@
+#!/usr/bin/env ruby
+
+require "bundler/setup"
+require "./app/app"
+
+VideoProcessor.start
+
+at_exit do 
+  LOG.info "Stoping all processors..."
+  BaseProcessor.stop_all
+end
+
+BaseProcessor::THREAD_POOL.map(&:last).each(&:join)

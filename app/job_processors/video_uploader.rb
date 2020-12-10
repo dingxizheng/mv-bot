@@ -37,15 +37,12 @@ class VideoUploader < BaseProcessor
 
       LOG.info "Start uploading music video for job: #{music_job.id}, song_id: #{music_job.song.musicid}, name: #{music_job.song.name}, artist: #{music_job.song.artist}"
 
-      tags = ["华语", "经典", "歌词", "高清"]
-      tags << song.artist
-
       data = {
-        title: "#{song.artist} - #{song.name} (动态歌词/最高音质)",
+        title: song.song_title,
         description: song.song_description,
         video: File.join(ENV["UPLOADER_FILE_FOLDER"], song.video_file_path(relative: true)),
         kids: false,
-        tags: tags.join(","),
+        tags: song.song_tags.join(", ").gsub(/\(.*?\)/, "").gsub(/（.*）/, "").strip,
         publish_type: "PUBLIC"
       }
 

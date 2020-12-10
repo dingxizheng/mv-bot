@@ -1,11 +1,12 @@
 # frozen_string_literal: true
-class MiguMusic
+class MiguMusic < BaseProvider
   SEARCH_BY_KEYWORD = "https://m.music.migu.cn/migu/remoting/scr_search_tag?type=2&keyword=%s&pgc=%s&rows=%s"
+  GET_SONGS_API     = "http://music.migu.cn/v3/api/music/audioPlayer/songs?type=1"
   MUSIC_INFO_API    = "https://app.c.nf.migu.cn/MIGUM2.0/v2.0/content/querySongBySongId.do?contentId=0&songId=%s"
   LYRIC_API         = "http://music.migu.cn/v3/api/music/audioPlayer/getLyric?copyrightId=%s"
   SONG_URL_TEMP     = "https://app.pd.nf.migu.cn/MIGUM2.0/v1.0/content/sub/listenSong.do?contentId=%s&copyrightId=0&netType=01&resourceType=%s&toneFlag=%s&channel=0"
   SONG_PIC_API      = "http://music.migu.cn/v3/api/music/audioPlayer/getSongPic"
-
+  TOPLIST_API       = "https://music.migu.cn/v3/music/top/%s"
   ARTIST_SONGS_API = "https://app.c.nf.migu.cn/MIGUM3.0/v1.0/template/singerSongs/release?templateVersion=2"
   DEFAULT_HEADERS = {
     "channel": "0",
@@ -23,37 +24,8 @@ class MiguMusic
   }
 
   class << self
-    def reqeuest(url, query: {}, headers: {})
-      LOG.info "Requesting url: #{url}, query: #{query}"
-      RestClient.get(url, { accept: :json, params: query, **DEFAULT_HEADERS, **headers })
-    end
-
-    def download_file(url, output:)
-      LOG.info "Downloading #{url}, output: #{output}"
-      rs = File.open(output, "w") do |file|
-        block = proc do |response|
-          if response.code.starts_with?("3")
-            File.delete(output)
-            LOG.info "Redirect to #{url}"
-            return download_file(response.header["location"], output: output)
-          end
-          file_size = response.content_length || 0
-          progress_bar = ProgressBar.new(file_size / 1024 / 1024)
-          response.read_body do |chunk|
-            progress_bar.increment!(chunk.size / 1024 / 1024) rescue nil
-            file.write(chunk)
-          end
-        end
-        RestClient::Request.execute(method: :get, url: url, headers: DEFAULT_HEADERS, block_response: block, timeout: 200, max_redirects: 5)
-      end
-
-      if !rs.code.starts_with?("2")
-        raise "Failed to download file from url: #{url}"
-      end
-    end
-
-    def parse_json(response)
-      JSON.parse(response.body)
+    def defualt_headers
+      DEFAULT_HEADERS
     end
 
     def search_music(keyword, page: 1, per_page: 30)
@@ -74,7 +46,13 @@ class MiguMusic
     end
 
     def song_info(mid)
-      resp = reqeuest(MUSIC_INFO_API % [mid]).then(&method(:parse_json))
+      songId = mid
+      if mid.starts_with?("6")
+        fetchedSongId = reqeuest(GET_SONGS_API, query: { copyrightId: mid }).then(&method(:parse_json)).dig("items", 0, "songId")
+        songId = fetchedSongId || mid
+      end
+
+      resp = reqeuest(MUSIC_INFO_API % [songId]).then(&method(:parse_json))
       if resp["code"] != "000000"
         raise "Failed to get song info by id #{mid}, response: #{resp}"
       else
@@ -101,33 +79,15 @@ class MiguMusic
       end
     end
 
-    def lyrics_to_ass_file(lyrics = [], path:)
-      lines = lyrics.map.with_index do |line, index|
-        start_time = line[:time]
-        text = line[:lyric]
-        start_hour, start_minute, start_second, start_micro_second = seconds_to_hour_minute_second(start_time)
-
-        end_time = lyrics[index + 1]&.[](:time) || 10_000_000
-        end_hour, end_minute, end_second, end_micro_second = seconds_to_hour_minute_second(end_time)
-
-        "Dialogue: 0,#{start_hour}:#{"%02d" % start_minute}:#{"%02d" % start_second}.#{"%02d" % start_micro_second},#{end_hour}:#{"%02d" % end_minute}:#{"%02d" % end_second}.#{"%02d" % end_micro_second},*Default,NTP,0000,0000,0000,,#{text}"
-      end
-
-      content = <<~ASS
-      [V4+ Styles]
-      Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-      Style: Default,Arial,20,&H00FFFFFF,&HF0000000,&H00000000,&HF0000000,1,0,0,0,100,100,0,0.00,1,1,0,2,30,30,10,134
-
-      [Events]
-      Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-      #{lines.join("\n")}
-      ASS
-
-      File.write(path, content)
-    end
-
     def song_url(content_id, bit_rate: 128)
       SONG_URL_TEMP % [content_id, "E", BIT_RATE_MAP[bit_rate.to_s] || "PQ"]
+    end
+
+    def toplist_songs(list_id = "migumusic")
+      response = reqeuest(TOPLIST_API % [list_id])
+      doc = Nokogiri::HTML.parse(response.body)
+      scripts = doc.xpath("//script")
+      JSON.parse(scripts[1]&.text&.gsub("var listData = ", "")).dig("songs", "items")
     end
 
     def song_pic_url(song_id)
@@ -144,7 +104,7 @@ class MiguMusic
       end
     end
 
-    def migu_to_song_model(migu_music = {}, skip_brackets: false)
+    def create_song_from_data(migu_music = {}, skip_brackets: false, keep_ost: false, accompaniment: false, remove_brackets: false)
       if migu_music.nil?
         LOG.info "Song migu_music is empty, skipping..."
         return
@@ -171,6 +131,11 @@ class MiguMusic
         end
       end.to_h.compact
 
+      if !accompaniment && song_info[:name].include?("伴奏")
+        LOG.info "Song name contains 伴奏, skipping..."
+        return
+      end
+
       if !Song.find_by(musicid: song_info["musicid"]).nil?
         LOG.info "Song #{song_info[:name]} exists, skipping..."
         return
@@ -181,7 +146,16 @@ class MiguMusic
         return
       end
 
+      # if song_info[:artist]&.size&.>(20)
+      #   LOG.info "Artist name #{song_info[:artist]} is too long, skipping..."
+      #   return
+      # end
+
       LOG.info "Song name good, #{song_info[:name]}"
+
+      if remove_brackets
+        song_info[:name] = song_info[:name].gsub(/\(.*?\)/, "").gsub(/（.*）/, "").strip
+      end
 
       MongoTransaction.start(log: true) do
         song = Song.create!(provider: :migu, **song_info)
@@ -190,14 +164,5 @@ class MiguMusic
     rescue => e
       LOG.error "Failed to save migu music #{migu_music}, error: #{e.message}"
     end
-
-    private
-      def seconds_to_hour_minute_second(milliseconds)
-        start_hour = milliseconds / 3600 / 1000
-        start_minute = (milliseconds - start_hour * 3600 * 1000) / 60 / 1000
-        start_second = (milliseconds - start_hour * 3600 * 1000 - start_minute * 60 * 1000) / 1000
-        micro_second = milliseconds - start_hour * 3600 * 1000 - start_minute * 60 * 1000 - start_second * 1000
-        [start_hour, start_minute, start_second, micro_second / 10]
-      end
   end
 end
