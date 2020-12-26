@@ -11,6 +11,13 @@ gem "nokogiri"
 # Language detection
 gem "cld"
 
+# Fake data generator
+gem "faker"
+
+# Youtube helper
+gem "google-api-client"
+gem "yt", "~> 0.33.0"
+
 # rest client
 gem "rest-client", "~> 2.0.2"
 gem "faraday"

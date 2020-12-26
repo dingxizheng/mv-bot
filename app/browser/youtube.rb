@@ -8,6 +8,9 @@ class Youtube
   YOUTUBE_COOKIES_PATH = "youtube.cookies"
 
   class << self
+    def subscribe
+    end
+
     def upload_video(title:, description:, video:, kids: false, tags:, publish_type:, category: "Music")
       LOG.info "Upload vdieo title: #{title}, description: #{description}"
       browser.goto("https://www.youtube.com/")
